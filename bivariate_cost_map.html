@@ -1,0 +1,1473 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bivariate Choropleth of Household Burdens</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; }
+        #map { flex: 1; height: 100vh; }
+        #sidebar {
+            width: 420px; height: 100vh; overflow-y: auto;
+            background: white; border-left: 2px solid #ccc;
+            box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+        }
+        #sidebar h3 {
+            margin: 0; padding: 15px;
+            background: #2d4a6e; color: white;
+            border-bottom: 2px solid #1e3450;
+            font-size: 15px; position: sticky; top: 0; z-index: 1000;
+        }
+        #sidebar h3 .sub { font-size: 11px; font-weight: 400; opacity: 0.8; display: block; margin-top: 3px; }
+        .controls { padding: 15px; background: #f7fafc; border-bottom: 2px solid #e2e8f0; }
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: #2d3748; }
+        .control-group select, .control-group button, .control-group input {
+            width: 100%; padding: 10px; font-size: 13px;
+            border: 1px solid #cbd5e0; border-radius: 6px; background: white; transition: all 0.2s;
+        }
+        .control-group select:focus, .control-group input:focus { outline: none; border-color: #5ac0d8; box-shadow: 0 0 0 3px rgba(90,192,216,0.15); }
+        .control-group button { background: #3c6e8e; color: white; font-weight: 600; cursor: pointer; border: none; }
+        .control-group button:hover:not(:disabled) { background: #2d4a6e; }
+        .control-group button:disabled { background: #cbd5e0; cursor: not-allowed; color: #a0aec0; }
+        .api-key-note {
+            font-size: 11px; color: #718096; margin-top: 5px; padding: 8px;
+            background: #edf2f7; border-radius: 4px; border-left: 3px solid #5ac0d8;
+        }
+        .api-key-note a { color: #3c6e8e; text-decoration: none; font-weight: 600; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #ecc94b; border-top-color: #744210; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; flex-shrink: 0; }
+        .loading-indicator {
+            display: none; padding: 10px 12px; background: #fefcbf;
+            border: 1px solid #ecc94b; border-radius: 6px;
+            font-size: 12px; color: #744210; font-weight: 500;
+            align-items: center;
+        }
+        .loading-indicator.active { display: flex; }
+        .status-info {
+            padding: 10px; background: #d6eef5; border: 1px solid #86cde0;
+            border-radius: 6px; font-size: 12px; color: #1e3a4a; margin-top: 10px;
+        }
+        .error-message {
+            padding: 12px; background: #fff5f5; border: 1px solid #fc8181;
+            border-radius: 6px; color: #742a2a; font-size: 12px; margin: 10px 0; display: none;
+        }
+        .error-message.active { display: block; }
+
+        .legend-section { padding: 15px; border-bottom: 1px solid #e2e8f0; }
+        .legend-section h4 { margin: 0 0 10px; font-size: 14px; color: #2d3748; }
+        .bivar-legend-wrap { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0 auto; }
+        .bivar-y-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10px; font-weight: 600; color: #666; text-align: center; line-height: 1.4; }
+        .bivar-y-label .axis-range { font-weight: 400; color: #999; }
+        .bivar-grid-wrap { display: flex; flex-direction: column; align-items: center; }
+        .bivar-grid { display: grid; grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); gap: 2px; }
+        .bivar-cell { border-radius: 3px; cursor: help; }
+        .bivar-x-label { font-size: 10px; font-weight: 600; color: #666; text-align: center; margin-top: 4px; line-height: 1.4; }
+        .bivar-x-label .axis-range { display: block; font-weight: 400; color: #999; }
+        .interp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+        .interp-item { padding: 8px; border-radius: 4px; border: 1px solid #eee; background: #fafafa; }
+        .interp-swatch { width: 16px; height: 16px; border-radius: 3px; display: inline-block; vertical-align: middle; margin-right: 6px; border: 1px solid rgba(0,0,0,0.1); }
+        .interp-label { font-size: 11px; font-weight: 600; color: #333; }
+        .interp-desc { font-size: 10px; color: #777; margin-top: 3px; line-height: 1.4; }
+
+        .county-table { width: 100%; border-collapse: collapse; }
+        .county-table th {
+            background: #edf6f9; padding: 10px 6px; text-align: left;
+            font-size: 11px; font-weight: 600; border-bottom: 2px solid #cbd5e0;
+            position: sticky; top: 51px; z-index: 999; color: #2d3748;
+        }
+        .county-table td { padding: 7px 6px; font-size: 12px; border-bottom: 1px solid #e2e8f0; }
+        .county-table tr:hover { background: #f7fafc; cursor: pointer; }
+        .county-name { font-weight: 500; color: #2d3748; }
+        .color-indicator { width: 18px; height: 18px; display: inline-block; border-radius: 4px; margin-right: 5px; vertical-align: middle; border: 1px solid rgba(0,0,0,0.1); }
+
+        .info { padding: 8px 10px; font: 13px/18px 'Segoe UI', sans-serif; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 6px; max-width: 320px; border: 1px solid #e2e8f0; }
+        .info h4 { margin: 0 0 8px; color: #2d4a6e; font-size: 13px; border-bottom: 2px solid #5ac0d8; padding-bottom: 4px; }
+        .reset-button { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 10px 15px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); cursor: pointer; font-weight: 600; display: none; border: 1px solid #e2e8f0; color: #2d3748; }
+        .reset-button:hover { background: #f7fafc; }
+        .methodology-note { padding: 12px; background: #edf6f9; border-radius: 6px; border-left: 3px solid #5ac0d8; font-size: 11px; color: #666; line-height: 1.5; margin: 0 15px 15px; }
+        .methodology-note strong { color: #2d4a6e; }
+        .hh-badge { display: inline-block; background: #edf6f9; border: 1px solid #86cde0; border-radius: 3px; padding: 1px 5px; font-size: 10px; color: #2d4a6e; font-weight: 600; }
+
+        /* Eviction overlay — sidebar toggle row */
+        .eviction-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0 2px; }
+        .eviction-toggle-label { font-size: 12px; font-weight: 600; color: #6b3d00; }
+        .eviction-toggle-row:has(input:disabled) .eviction-toggle-label { color: #aaa; }
+        .info-btn { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #cbd5e0; color: #4a5568; font-size: 9px; font-weight: 700; font-style: normal; cursor: default; margin-left: 4px; vertical-align: middle; position: relative; line-height: 1; flex-shrink: 0; }
+        .info-btn:hover .info-tooltip, .info-btn:focus .info-tooltip { display: block; }
+        .info-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #2d3748; color: white; font-size: 11px; font-weight: 400; padding: 7px 10px; border-radius: 5px; width: 210px; line-height: 1.5; z-index: 9999; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+        .info-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: #2d3748; }
+        .toggle-switch { position: relative; width: 28px; height: 16px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .toggle-slider { position: absolute; inset: 0; background: #cbd5e0; border-radius: 16px; cursor: pointer; transition: background 0.2s; }
+        .toggle-slider:before { content: ''; position: absolute; width: 10px; height: 10px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        .toggle-switch input:checked + .toggle-slider { background: #c07020; }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(12px); }
+        .toggle-switch input:disabled + .toggle-slider { background: #e2e8f0; cursor: not-allowed; }
+        .eviction-legend { padding: 12px 15px; background: #fdf9f2; border-bottom: 1px solid #e2e8f0; display: none; }
+        .eviction-legend h4 { margin: 0 0 8px; font-size: 13px; color: #6b3d00; }
+        .hatch-legend-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+        .hatch-swatch { width: 40px; height: 18px; border: 1px solid #ccc; border-radius: 2px; flex-shrink: 0; }
+        .hatch-label { font-size: 11px; color: #555; }
+        .eviction-note { font-size: 10px; color: #999; margin-top: 6px; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div id="map">
+        <div class="reset-button" id="resetButton" onclick="resetToCountyView()">← Back to County View</div>
+    </div>
+    <div id="sidebar">
+        <h3>
+            🗺️ Bivariate Choropleth of Household Burdens
+            <span class="sub">Census ACS 2022 + HUD Location Affordability Index v3</span>
+        </h3>
+        <div class="controls">
+            <div class="control-group">
+                <label for="apiKeyInput">Census API Key:</label>
+                <div style="display:flex;gap:6px;align-items:center">
+                    <input type="password" id="apiKeyInput" placeholder="Enter your Census API key" style="flex:1;min-width:0">
+                    <button id="toggleKeyBtn" onclick="toggleKeyVisibility()" title="Toggle key visibility" style="flex-shrink:0;width:auto;padding:0 10px;height:38px;background:none;border:1px solid #cbd5e0;border-radius:6px;cursor:pointer;font-size:12px;color:#718096;font-weight:500;letter-spacing:0.02em">Show</button>
+                </div>
+                <div class="api-key-note">
+                    Don't have a key? <a href="https://api.census.gov/data/key_signup.html" target="_blank">Get one free here</a>. HUD LAI data requires no key.
+                </div>
+            </div>
+            <div class="control-group">
+                <label for="stateSelector">Select State:</label>
+                <select id="stateSelector"><option value="">-- Choose a State --</option></select>
+            </div>
+            <div class="control-group">
+                <button id="loadDataBtn" disabled>Load County Data</button>
+            </div>
+            <div class="loading-indicator" id="loadingIndicator"><span class="spinner"></span><span id="loadingText">📊 Loading...</span></div>
+            <div class="error-message" id="errorMessage"></div>
+            <div class="status-info" id="statusInfo" style="display:none;"></div>
+            <div class="eviction-toggle-row" id="evictionToggleRow" style="display:none;">
+                <span class="eviction-toggle-label">Eviction rate overlay
+                    <span class="info-btn" tabindex="0">i
+                        <span class="info-tooltip" style="width:260px">Eviction Lab data (2000–2018), ≥67% coverage required.<br><b>Tract-level:</b> AL AZ CO CT DE DC FL GA IA MA MN MO NE NJ NC OH OR PA RI SC TX UT VA WA WI WY<br><b>County from CSV:</b> AL CO DE DC FL GA IA MA MN MO NE NJ NC OH OR PA SC UT VA WA WI WY<br><b>County aggregated from tracts:</b> AZ CT RI TX</span>
+                    </span>
+                </span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="evictionToggle" onchange="toggleEvictionOverlay(this.checked)" disabled>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+        <div class="eviction-legend" id="evictionLegend">
+            <h4>Eviction Rate Overlay</h4>
+            <div class="hatch-legend-row"><svg class="hatch-swatch" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="18" fill="white" stroke="#ccc"/></svg><span class="hatch-label">&lt;5% — Very low</span></div>
+            <div class="hatch-legend-row"><svg class="hatch-swatch" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="ls1" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#a05000" stroke-width="1.2"/></pattern></defs><rect width="40" height="18" fill="url(#ls1)"/></svg><span class="hatch-label">5–10% — Low</span></div>
+            <div class="hatch-legend-row"><svg class="hatch-swatch" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="ls2" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="#a05000" stroke-width="1.5"/></pattern></defs><rect width="40" height="18" fill="url(#ls2)"/></svg><span class="hatch-label">10–20% — High</span></div>
+            <div class="hatch-legend-row"><svg class="hatch-swatch" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="ls3" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="#a05000" stroke-width="1.5"/><line x1="0" y1="0" x2="5" y2="0" stroke="#a05000" stroke-width="1.5"/></pattern></defs><rect width="40" height="18" fill="url(#ls3)"/></svg><span class="hatch-label">&gt;20% — Very high</span></div>
+            <div class="eviction-note">Source: Eviction Lab (Princeton). Latest available year per tract. Available where ≥67% tract or county coverage exists. County-level shown from CSV where available, otherwise aggregated from tracts.</div>
+        </div>
+        <div class="legend-section" id="legendSection" style="display:none;">
+            <h4>Bivariate Legend</h4>
+            <div class="bivar-legend-wrap">
+                <div class="bivar-y-label">Burdened by housing<span class="axis-range"> ▲</span></div>
+                <div class="bivar-grid-wrap">
+                    <div class="bivar-grid" id="legendGrid"></div>
+                    <div class="bivar-x-label">Transport share of budget<span class="axis-range"></span> ▶</div>
+                </div>
+            </div>
+            <div class="interp-grid" id="interpGrid"></div>
+        </div>
+        <div class="methodology-note" id="methodNote" style="display:none;">
+            <strong>Housing Burden (Y-axis):</strong> Share of cost-computable households (renters + owners) spending 30%+ of income on housing · ACS 2022 5-yr (B25070/B25091 bracket counts). Color range adapts to the loaded geography (10th–90th percentile).<br><br>
+            <strong>Transport Cost (X-axis):</strong> HUD Location Affordability Index v3 — modeled transportation spending as % of income, accounting for auto ownership, VMT, transit, gas prices. Each tract uses an <em>adaptive household profile</em> matched to its income ratio, household size, and commuter count. Color range adapts to the loaded geography.<br><br>
+            <strong>Terracotta</strong> = housing-dominated burden. <strong>Slate blue</strong> = transport-dominated. <strong>Dark eggplant purple</strong> = both high — broad-based cost burden on both dimensions.
+        </div>
+        <table class="county-table" id="dataTable">
+            <thead><tr>
+                <th id="nameHeader">County</th>
+                <th style="text-align:right">% Burdened</th>
+                <th style="text-align:right">Transport %</th>
+                <th style="text-align:right" id="evictionHeader" style="display:none">Evict %</th>
+                <th style="text-align:right">Profile</th>
+            </tr></thead>
+            <tbody id="tableBody">
+                <tr><td colspan="4" style="text-align:center;padding:30px;color:#a0aec0;">👆 Select a state to begin</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+    // =============================================
+    // State data
+    // =============================================
+    const stateData = {
+        '01':{name:'Alabama',center:[32.81,-86.79],zoom:7},'02':{name:'Alaska',center:[64.2,-152.49],zoom:4},
+        '04':{name:'Arizona',center:[33.73,-111.43],zoom:7},'05':{name:'Arkansas',center:[34.97,-92.37],zoom:7},
+        '06':{name:'California',center:[36.12,-119.68],zoom:6},'08':{name:'Colorado',center:[39.06,-105.31],zoom:7},
+        '09':{name:'Connecticut',center:[41.6,-72.76],zoom:9},'10':{name:'Delaware',center:[39.32,-75.51],zoom:9},
+        '11':{name:'District of Columbia',center:[38.9,-77.03],zoom:12},'12':{name:'Florida',center:[27.77,-81.69],zoom:7},
+        '13':{name:'Georgia',center:[33.04,-83.64],zoom:7},'15':{name:'Hawaii',center:[20.46,-157.5],zoom:7},
+        '16':{name:'Idaho',center:[44.24,-114.48],zoom:6},'17':{name:'Illinois',center:[40.35,-88.99],zoom:7},
+        '18':{name:'Indiana',center:[39.85,-86.26],zoom:7},'19':{name:'Iowa',center:[42.01,-93.21],zoom:7},
+        '20':{name:'Kansas',center:[38.53,-96.73],zoom:7},'21':{name:'Kentucky',center:[37.67,-84.67],zoom:7},
+        '22':{name:'Louisiana',center:[31.17,-91.87],zoom:7},'23':{name:'Maine',center:[44.69,-69.38],zoom:7},
+        '24':{name:'Maryland',center:[39.06,-76.8],zoom:8},'25':{name:'Massachusetts',center:[42.23,-71.53],zoom:8},
+        '26':{name:'Michigan',center:[43.33,-84.54],zoom:7},'27':{name:'Minnesota',center:[45.69,-93.9],zoom:7},
+        '28':{name:'Mississippi',center:[32.74,-89.68],zoom:7},'29':{name:'Missouri',center:[38.46,-92.29],zoom:7},
+        '30':{name:'Montana',center:[46.92,-110.45],zoom:6},'31':{name:'Nebraska',center:[41.13,-98.27],zoom:7},
+        '32':{name:'Nevada',center:[38.31,-117.06],zoom:7},'33':{name:'New Hampshire',center:[43.45,-71.56],zoom:8},
+        '34':{name:'New Jersey',center:[40.3,-74.52],zoom:8},'35':{name:'New Mexico',center:[34.84,-106.25],zoom:7},
+        '36':{name:'New York',center:[42.17,-74.95],zoom:7},'37':{name:'North Carolina',center:[35.63,-79.81],zoom:7},
+        '38':{name:'North Dakota',center:[47.53,-99.78],zoom:7},'39':{name:'Ohio',center:[40.39,-82.76],zoom:7},
+        '40':{name:'Oklahoma',center:[35.57,-96.93],zoom:7},'41':{name:'Oregon',center:[44.57,-122.07],zoom:7},
+        '42':{name:'Pennsylvania',center:[40.59,-77.21],zoom:7},'44':{name:'Rhode Island',center:[41.68,-71.51],zoom:9},
+        '45':{name:'South Carolina',center:[33.86,-80.95],zoom:7},'46':{name:'South Dakota',center:[44.3,-99.44],zoom:7},
+        '47':{name:'Tennessee',center:[35.75,-86.69],zoom:7},'48':{name:'Texas',center:[31.05,-97.56],zoom:6},
+        '49':{name:'Utah',center:[40.15,-111.86],zoom:7},'50':{name:'Vermont',center:[44.05,-72.71],zoom:8},
+        '51':{name:'Virginia',center:[37.77,-78.17],zoom:7},'53':{name:'Washington',center:[47.4,-121.49],zoom:7},
+        '54':{name:'West Virginia',center:[38.49,-80.95],zoom:7},'55':{name:'Wisconsin',center:[44.27,-89.62],zoom:7},
+        '56':{name:'Wyoming',center:[42.76,-107.3],zoom:7}
+    };
+
+    // =============================================
+    // Bivariate colors: continuous interpolation in OKLAB space
+    // =============================================
+    // 3×3 anchor grid [housing-row 0..2][transport-col 0..2]
+    // Row 0 = H_MIN (20% burdened), Row 2 = H_MAX (60% burdened)
+    // Col 0 = T_MIN (10% transport), Col 2 = T_MAX (20% transport)
+    // Low corner is warm cream; high-housing corner is deep sienna; high-transport corner is slate blue.
+    const bivarColors = [
+        ["#e0dbd4", "#c8d4d8", "#7aaab8"],  // low housing  — desaturated warm grey → cool slate blue
+        ["#e8c098", "#d4c0cc", "#4e6898"],  // mid housing  — warm sand → pale lavender → mid slate blue
+        ["#c05828", "#8c3868", "#4a1a6e"],  // high housing — deep sienna → deep rose → dark eggplant purple
+    ];
+    // Dynamic display ranges — updated after each data load based on 10th/90th percentiles.
+    // Declared as lets so getBivarColor always reads the current values.
+    let H_MIN = 20, H_MAX = 60, T_MIN = 10, T_MAX = 20;
+
+    function computeRanges(dataObj) {
+        const hVals = Object.values(dataObj).map(d => d.housingBurden).filter(v => v != null);
+        const tVals = Object.values(dataObj).map(d => d.transportPct).filter(v => v != null);
+        if (!hVals.length || !tVals.length) return;
+        hVals.sort((a,b) => a-b); tVals.sort((a,b) => a-b);
+        const pct = (arr, p) => arr[Math.max(0, Math.round((arr.length-1)*p/100))];
+        // Round outward to nearest 5 for clean legend labels
+        const hLo = Math.floor(pct(hVals, 10) / 5) * 5;
+        const hHi = Math.ceil( pct(hVals, 90) / 5) * 5;
+        const tLo = Math.floor(pct(tVals, 10) / 5) * 5;
+        const tHi = Math.ceil( pct(tVals, 90) / 5) * 5;
+        // Enforce minimum spans so homogeneous geographies still show contrast
+        H_MIN = hLo; H_MAX = Math.max(hHi, hLo + 15);
+        T_MIN = tLo; T_MAX = Math.max(tHi, tLo + 5);
+    }
+
+    const housingBreaks = [20, 30]; // kept for table sort / legend labels
+    const transportBreaks = [12, 20];
+
+    // sRGB hex → linear-light RGB [0–1]
+    function hexToLinear(hex) {
+        const r = parseInt(hex.slice(1,3),16)/255;
+        const g = parseInt(hex.slice(3,5),16)/255;
+        const b = parseInt(hex.slice(5,7),16)/255;
+        const toL = c => c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+        return [toL(r), toL(g), toL(b)];
+    }
+    // linear RGB → OKLAB
+    function linearToOklab(r, g, b) {
+        const l = 0.4122214708*r + 0.5363325363*g + 0.0514459929*b;
+        const m = 0.2119034982*r + 0.6806995451*g + 0.1073969566*b;
+        const s = 0.0883024619*r + 0.2817188376*g + 0.6299787005*b;
+        const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+        return [
+            0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_,
+            1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_,
+            0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_
+        ];
+    }
+    // OKLAB → linear RGB (clamp negatives)
+    function oklabToLinear(L, a, b) {
+        const l_ = L + 0.3963377774*a + 0.2158037573*b;
+        const m_ = L - 0.1055613458*a - 0.0638541728*b;
+        const s_ = L - 0.0894841775*a - 1.2914855480*b;
+        const l = l_*l_*l_, m = m_*m_*m_, s = s_*s_*s_;
+        return [
+            Math.max(0,+4.0767416621*l - 3.3077115913*m + 0.2309699292*s),
+            Math.max(0,-1.2684380046*l + 2.6097574011*m - 0.3413193965*s),
+            Math.max(0,-0.0041960863*l - 0.7034186147*m + 1.7076147010*s)
+        ];
+    }
+    function linearToHex(r, g, b) {
+        const toS = c => Math.min(1, c <= 0.0031308 ? 12.92*c : 1.055*Math.pow(c,1/2.4)-0.055);
+        return '#' + [r,g,b].map(c => Math.round(toS(c)*255).toString(16).padStart(2,'0')).join('');
+    }
+
+    // Pre-convert all 9 anchors to OKLAB
+    const anchorLab = bivarColors.map(row => row.map(hex => {
+        const [r,g,b] = hexToLinear(hex);
+        return linearToOklab(r,g,b);
+    }));
+
+    function getHC(v) { return v == null ? -1 : v < housingBreaks[0] ? 0 : v < housingBreaks[1] ? 1 : 2; }
+    function getTC(v) { return v == null ? -1 : v < transportBreaks[0] ? 0 : v < transportBreaks[1] ? 1 : 2; }
+
+    function getBivarColor(h, t) {
+        if (h == null || t == null) return '#d0d0d0';
+        // Normalise to [0,1] within the display range; clamp outside
+        const hf = Math.min(1, Math.max(0, (h - H_MIN) / (H_MAX - H_MIN)));
+        const tf = Math.min(1, Math.max(0, (t - T_MIN) / (T_MAX - T_MIN)));
+        // Bilinear interpolation across the 3×3 grid in OKLAB
+        // Grid positions: col 0=tf≤0, col 1=tf=0.5, col 2=tf=1 → map tf to [0,2]
+        const tx = tf * 2, ty = hf * 2;
+        const c0 = Math.min(1, Math.floor(tx)), c1 = Math.min(2, c0 + 1);
+        const r0 = Math.min(1, Math.floor(ty)), r1 = Math.min(2, r0 + 1);
+        const xt = tx - c0, yt = ty - r0;
+        // Interpolate top row, bottom row, then between them
+        const interp = (a, b, t) => [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+        const top    = interp(anchorLab[r0][c0], anchorLab[r0][c1], xt);
+        const bottom = interp(anchorLab[r1][c0], anchorLab[r1][c1], xt);
+        const final  = interp(top, bottom, yt);
+        const [rl,gl,bl] = oklabToLinear(final[0], final[1], final[2]);
+        return linearToHex(rl, gl, bl);
+    }
+
+    // =============================================
+    // LAI Household Profile Matching
+    // =============================================
+    // [id, income_frac, hh_size, commuters]
+    const hhProfiles = [
+        [1, 1.0,   4, 2],  // Median-income family, 2 commuters
+        [2, 0.127, 1, 1],  // Very low income single
+        [3, 0.5,   1, 1],  // Moderate-income single
+        [4, 1.35,  1, 1],  // High-income single
+        [5, 0.8,   2, 0],  // Moderate-income retired couple
+        [6, 0.5,   3, 1],  // Moderate-income single parent
+        [7, 0.8,   3, 1],  // Moderate-income family
+        [8, 1.5,   4, 2],  // High-income family
+    ];
+    const hhLabels = {
+        1:'Median family (4p,2c)', 2:'Very low single', 3:'Mod single',
+        4:'High single', 5:'Mod retired couple', 6:'Mod single parent',
+        7:'Mod family (3p,1c)', 8:'High family (4p,2c)'
+    };
+
+    function selectProfile(incomeRatio, avgHHSize, commutersPerHH) {
+        let bestId = 7, bestDist = Infinity;
+        for (const [id, incFrac, hhSize, comm] of hhProfiles) {
+            // Weighted distance: income matters most, then size, then commuters
+            const dInc = ((incomeRatio || 0.8) - incFrac) / 1.5;
+            const dSize = ((avgHHSize || 2.5) - hhSize) / 4;
+            const dComm = ((commutersPerHH || 1) - comm) / 2;
+            const dist = dInc*dInc*3 + dSize*dSize + dComm*dComm;
+            if (dist < bestDist) { bestDist = dist; bestId = id; }
+        }
+        return bestId;
+    }
+
+    // =============================================
+    // Global state
+    // =============================================
+    let currentStateFips = null, currentCountyFips = null, currentView = 'county';
+    let countyData = {}, tractData = {};
+    let geojson = null, tractLayer = null, map = null, info = null;
+    let censusApiKey = '';
+    let laiTractCache = {};
+    let ctTractToRegion = {};  // CT only: tract number → planning region FIPS
+
+    // =============================================
+    // Eviction overlay state
+    // =============================================
+    let evictionTractCache  = {};    // key: 11-char GEOID → filing_rate
+    let evictionCountyCache = {};    // key: 5-char GEOID  → filing_rate
+    let hatchLayer = null;
+    let evictionLoaded = false;
+    let evictionNeedsCountyAgg = false;  // aggregate county from tracts when county CSV coverage is thin
+    let tractDataPrefetchPromise = null;   // resolves when background tract census prefetch completes
+    let evictionOverlayActive = false;
+
+    function getHatchClass(er) {
+        if (er == null || er < 0) return 0;
+        if (er < 5)  return 0;  // no hatch — very low
+        if (er < 10) return 1;  // sparse diagonal — low
+        if (er < 20) return 2;  // medium diagonal — high
+        return 3;               // dense crosshatch — very high
+    }
+
+    // =============================================
+    // Housing burden calculation (bracket-counting)
+    // =============================================
+    // Returns % of cost-computable households spending 30%+ of income on housing.
+    // Renter:  B25070_007–010 burdened; B25070_001 total; B25070_011 not computed
+    // Owner w/ mortgage:  B25091_008–011 burdened; B25091_012 not computed
+    // Owner w/o mortgage: B25091_015–019 burdened; B25091_020 not computed
+    // Owner total: B25091_001
+    function burdenFromBrackets(row, idxMap) {
+        const n = k => { const v = parseInt(row[idxMap[k]]); return isNaN(v) ? 0 : Math.max(0, v); };
+        const rTotal      = n('r_total');
+        const rNotComp    = n('r_notcomp');
+        const rBurdened   = n('r_007') + n('r_008') + n('r_009') + n('r_010');
+        const oTotal      = n('o_total');
+        const oNotComp    = n('o_notcomp_m') + n('o_notcomp_nm');
+        const oBurdened   = n('o_008') + n('o_009') + n('o_010') + n('o_011')   // with mortgage
+                          + n('o_015') + n('o_016') + n('o_017') + n('o_018') + n('o_019'); // without
+        const totalComp   = (rTotal - rNotComp) + (oTotal - oNotComp);
+        const totalBurd   = rBurdened + oBurdened;
+        if (totalComp <= 0) return null;
+        return Math.round((totalBurd / totalComp) * 1000) / 10; // one decimal
+    }
+
+    // =============================================
+    // LAI Feature Service
+    // =============================================
+    const LAI_BASE = 'https://services.arcgis.com/VTyQ9soqVukalItT/ArcGIS/rest/services/Location_Affordability_Index_v3/FeatureServer/0/query';
+    const LAI_FIELDS = 'TRACT,COUNTY,STATE,median_hh_income,area_median_hh_income,avg_hh_size,commuters_per_hh,hh1_t,hh2_t,hh3_t,hh4_t,hh5_t,hh6_t,hh7_t,hh8_t,hh1_t_cost,hh2_t_cost,hh3_t_cost,hh4_t_cost,hh5_t_cost,hh6_t_cost,hh7_t_cost,hh8_t_cost';
+
+    // Connecticut switched from 8 legacy counties to 9 planning regions in 2022 ACS.
+    // The LAI service still uses the legacy county FIPS — override for CT only.
+    const CT_LEGACY_COUNTIES = ['001','003','005','007','009','011','013','015'];
+
+    async function fetchLAIForState(stateFips, counties, onProgress) {
+        // CT planning region FIPS (110-190) don't exist in LAI — use legacy county codes instead
+        const queryCounties = stateFips === '09' ? CT_LEGACY_COUNTIES : counties;
+        // A state like CA has ~8000 tracts; fetching the whole state risks hitting
+        // the server's maxRecordCount even with pagination.
+        const allFeatures = [];
+        const batchSize = 2000;
+
+        for (let i = 0; i < queryCounties.length; i++) {
+            const countyFips = queryCounties[i];
+            if (onProgress) onProgress(i, queryCounties.length, countyFips);
+            let offset = 0;
+            while (true) {
+                const where = `STATE%3D%27${stateFips}%27+AND+COUNTY%3D%27${countyFips}%27`;
+                const url = `${LAI_BASE}?where=${where}&outFields=${LAI_FIELDS}&returnGeometry=false&resultRecordCount=${batchSize}&resultOffset=${offset}&f=json`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`HUD LAI query failed for county ${countyFips}: ${resp.status}`);
+                const data = await resp.json();
+                if (data.error) throw new Error('LAI: ' + data.error.message);
+                if (!data.features || data.features.length === 0) break;
+                allFeatures.push(...data.features);
+                if (!data.exceededTransferLimit) break;
+                offset += batchSize;
+            }
+        }
+        return allFeatures;
+    }
+
+    function processLAIFeature(attrs) {
+        const incRatio = (attrs.median_hh_income && attrs.area_median_hh_income && attrs.area_median_hh_income > 0)
+            ? attrs.median_hh_income / attrs.area_median_hh_income : null;
+        const profileId = selectProfile(incRatio, attrs.avg_hh_size, attrs.commuters_per_hh);
+
+        // Try the adaptive profile first; if its fields are null/suppressed, scan all profiles
+        // sorted by proximity to incRatio and use the nearest one that actually has data.
+        const valid = v => v != null && v > 0 && v < 100;
+        let usedProfileId = profileId;
+        let tPct = attrs['hh' + profileId + '_t'];
+        let tCost = attrs['hh' + profileId + '_t_cost'];
+        if (!valid(tPct)) {
+            const sorted = hhProfiles.slice().sort((a, b) => {
+                return Math.abs((incRatio || 0.8) - a[1]) - Math.abs((incRatio || 0.8) - b[1]);
+            });
+            for (const [id] of sorted) {
+                const candidate = attrs['hh' + id + '_t'];
+                if (valid(candidate)) {
+                    usedProfileId = id;
+                    tPct = candidate;
+                    tCost = attrs['hh' + id + '_t_cost'];
+                    break;
+                }
+            }
+        }
+
+        return {
+            transportPct: valid(tPct) ? Math.round(tPct * 10) / 10 : null,
+            transportCost: tCost,
+            profileId: usedProfileId,
+            profileAdapted: usedProfileId !== profileId,
+            incomeRatio: incRatio ? Math.round(incRatio * 100) / 100 : null,
+        };
+    }
+
+    // =============================================
+    // Init
+    // =============================================
+    window.addEventListener('load', function() {
+        map = L.map('map').setView([39.83, -98.58], 5);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap · © CARTO · Census ACS 2022 · HUD LAI v3 · Eviction Lab 2018', maxZoom: 18
+        }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+            maxZoom: 18, pane: 'overlayPane'
+        }).addTo(map);
+
+        // Inject SVG hatch pattern defs into the map's SVG container
+        // We wait for the map to fully init so the SVG renderer exists
+        setTimeout(() => {
+            const mapSvg = document.querySelector('#map svg');
+            if (mapSvg) {
+                const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                defs.innerHTML = `
+                    <pattern id="hatch-1" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                        <line x1="0" y1="0" x2="0" y2="8" stroke="#a05000" stroke-width="1.3" stroke-opacity="0.7"/>
+                    </pattern>
+                    <pattern id="hatch-2" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                        <line x1="0" y1="0" x2="0" y2="5" stroke="#a05000" stroke-width="1.5" stroke-opacity="0.75"/>
+                    </pattern>
+                    <pattern id="hatch-3" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                        <line x1="0" y1="0" x2="0" y2="5" stroke="#a05000" stroke-width="1.5" stroke-opacity="0.8"/>
+                        <line x1="0" y1="0" x2="5" y2="0" stroke="#a05000" stroke-width="1.5" stroke-opacity="0.8"/>
+                    </pattern>
+                `;
+                mapSvg.insertBefore(defs, mapSvg.firstChild);
+            }
+        }, 300);
+
+        const sel = document.getElementById('stateSelector');
+        Object.entries(stateData).sort((a,b) => a[1].name.localeCompare(b[1].name))
+            .forEach(([f, s]) => { const o = document.createElement('option'); o.value = f; o.textContent = s.name; sel.appendChild(o); });
+
+        document.getElementById('apiKeyInput').addEventListener('input', function() { censusApiKey = this.value.trim(); updateLoadBtn(); });
+        sel.addEventListener('change', function() { if(this.value) { currentStateFips = this.value; map.setView(stateData[this.value].center, stateData[this.value].zoom); } updateLoadBtn(); });
+        document.getElementById('loadDataBtn').addEventListener('click', loadStateData);
+
+        info = L.control();
+        info.onAdd = function() { this._div = L.DomUtil.create('div','info'); this.update(); return this._div; };
+        info.update = function(d) {
+            const vt = currentView === 'tract' ? 'Tract' : 'County';
+            if (!d) { this._div.innerHTML = '<h4>'+vt+' Cost Burden</h4>Hover over a '+vt.toLowerCase(); return; }
+            let html = '<h4>'+vt+' Cost Burden</h4><b>'+d.name+'</b><br/>';
+            html += 'Housing: <b>'+(d.housingBurden!=null ? d.housingBurden+'% burdened' : 'N/A')+'</b>';
+            html += '<br/>Transport: <b>'+(d.transportPct!=null ? d.transportPct+'%' : 'N/A')+'</b>'+(d.transportFallback ? ' <span style="color:#f90;font-size:10px" title="No tract-level LAI data; using county average">~county avg</span>' : (d.laiTracts === 0 ? ' <span style="color:#aaa;font-size:10px" title="No LAI tract data found for this county">~no LAI data</span>' : ''));
+            if (d.transportCost) html += ' <span style="color:#999;font-size:11px">($'+Math.round(d.transportCost).toLocaleString()+'/yr)</span>';
+            if (d.evictionRate != null) html += '<br/>Eviction rate: <b>'+d.evictionRate+'%</b>';
+            if (d.profileId) html += '<br/><span style="font-size:11px;color:#888">Profile: hh'+d.profileId+' — '+hhLabels[d.profileId]+(d.profileAdapted ? ' <span title="Best-match profile used; adaptive profile had no data" style="color:#f90">~alt profile</span>' : '')+'</span>';
+            if (d.incomeRatio) html += '<br/><span style="font-size:11px;color:#888">Income ratio: '+d.incomeRatio+'× area median</span>';
+            this._div.innerHTML = html;
+        };
+        info.addTo(map);
+        buildLegend();
+    });
+
+    function toggleKeyVisibility() {
+        const input = document.getElementById('apiKeyInput');
+        const btn = document.getElementById('toggleKeyBtn');
+        if (input.type === 'password') {
+            input.type = 'text';
+            btn.textContent = 'Hide';
+        } else {
+            input.type = 'password';
+            btn.textContent = 'Show';
+        }
+    }
+
+    function updateLoadBtn() { document.getElementById('loadDataBtn').disabled = !currentStateFips || !censusApiKey; }
+
+    function buildLegend() {
+        const gridEl = document.getElementById('legendGrid');
+        gridEl.innerHTML = '';
+        gridEl.style.cssText = 'width:120px;height:120px;position:relative;';
+        const canvas = document.createElement('canvas');
+        canvas.width = 120; canvas.height = 120;
+        canvas.style.cssText = 'border-radius:3px;display:block;';
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(120, 120);
+        for (let py = 0; py < 120; py++) {
+            for (let px = 0; px < 120; px++) {
+                const h = H_MIN + (H_MAX - H_MIN) * (1 - py / 119);
+                const t = T_MIN + (T_MAX - T_MIN) * (px / 119);
+                const hex = getBivarColor(h, t);
+                const r = parseInt(hex.slice(1,3),16);
+                const g = parseInt(hex.slice(3,5),16);
+                const b = parseInt(hex.slice(5,7),16);
+                const idx = (py * 120 + px) * 4;
+                imgData.data[idx]   = r;
+                imgData.data[idx+1] = g;
+                imgData.data[idx+2] = b;
+                imgData.data[idx+3] = 255;
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        gridEl.appendChild(canvas);
+
+        // Update axis labels — title line + range line
+        document.querySelector('.bivar-y-label').innerHTML =
+            `Burdened by housing<br><span class="axis-range">${H_MIN}–${H_MAX}%</span>`;
+        const xLabel = document.querySelector('.bivar-x-label');
+        if (xLabel) xLabel.innerHTML =
+            `Transport share of budget<br><span class="axis-range">${T_MIN}–${T_MAX}%</span>`;
+
+        // Corner swatches — use values just inside the current range endpoints
+        const hLo = H_MIN + (H_MAX - H_MIN) * 0.05;
+        const hHi = H_MIN + (H_MAX - H_MIN) * 0.95;
+        const tLo = T_MIN + (T_MAX - T_MIN) * 0.05;
+        const tHi = T_MIN + (T_MAX - T_MIN) * 0.95;
+        const ig = document.getElementById('interpGrid'); ig.innerHTML = '';
+        [{color:getBivarColor(hLo,tLo), label:'Low–Low',                   desc:'Low burden on both dimensions'},
+         {color:getBivarColor(hLo,tHi), label:'Low Housing, High Transport', desc:'Car-dependent but not housing-stressed'},
+         {color:getBivarColor(hHi,tLo), label:'High Housing, Low Transport', desc:'Expensive housing but good transit access'},
+         {color:getBivarColor(hHi,tHi), label:'High–High',                   desc:'Broad-based cost burden on both dimensions'}
+        ].forEach(item => {
+            const d = document.createElement('div'); d.className = 'interp-item';
+            d.innerHTML = `<div><span class="interp-swatch" style="background:${item.color}"></span><span class="interp-label">${item.label}</span></div><div class="interp-desc">${item.desc}</div>`;
+            ig.appendChild(d);
+        });
+    }
+
+    // =============================================
+    // Eviction overlay constants (must be defined before loadStateData references them)
+    // =============================================
+    const EVICTION_TRACT_URL   = 'https://eviction-lab-data-downloads.s3.amazonaws.com/data-for-analysis/tract_proprietary_valid_2000_2018_y2024m12.csv';
+    const EVICTION_COUNTY_URL  = 'https://eviction-lab-data-downloads.s3.amazonaws.com/data-for-analysis/county_proprietary_valid_2000_2018.csv';
+
+    // Expected county/equivalent counts per state (used to assess eviction data coverage)
+    const EXPECTED_COUNTIES = {
+        'Alabama':67,'Alaska':30,'Arizona':15,'Arkansas':75,'California':58,
+        'Colorado':64,'Connecticut':8,'Delaware':3,'District of Columbia':1,
+        'Florida':67,'Georgia':159,'Hawaii':5,'Idaho':44,'Illinois':102,
+        'Indiana':92,'Iowa':99,'Kansas':105,'Kentucky':120,'Louisiana':64,
+        'Maine':16,'Maryland':24,'Massachusetts':14,'Michigan':83,'Minnesota':87,
+        'Mississippi':82,'Missouri':115,'Montana':56,'Nebraska':93,'Nevada':17,
+        'New Hampshire':10,'New Jersey':21,'New Mexico':33,'New York':62,
+        'North Carolina':100,'North Dakota':53,'Ohio':88,'Oklahoma':77,
+        'Oregon':36,'Pennsylvania':67,'Rhode Island':5,'South Carolina':46,
+        'South Dakota':66,'Tennessee':95,'Texas':254,'Utah':29,'Vermont':14,
+        'Virginia':133,'Washington':39,'West Virginia':55,'Wisconsin':72,'Wyoming':23
+    };
+
+    // Pre-computed eviction coverage from the national proprietary files.
+    // counties = unique county FIPS in county CSV; tracts = unique tract FIPS in tract CSV.
+    // Regenerate by running computeEvictionCoverage() in console if files change.
+    const EVICTION_COVERAGE = {
+        'Alabama':        {counties:66, tracts:1154},
+        'Alaska':         {counties:6,  tracts:19},
+        'Arizona':        {counties:6,  tracts:1213},
+        'Arkansas':       {counties:51, tracts:276},
+        'California':     {counties:16, tracts:184},
+        'Colorado':       {counties:62, tracts:1117},
+        'Connecticut':    {counties:8,  tracts:833},
+        'Delaware':       {counties:3,  tracts:218},
+        'District of Columbia': {counties:1, tracts:179},
+        'Florida':        {counties:47, tracts:3553},
+        'Georgia':        {counties:128,tracts:1662},
+        'Hawaii':         {counties:2,  tracts:55},
+        'Illinois':       {counties:66, tracts:1782},
+        'Indiana':        {counties:32, tracts:436},
+        'Iowa':           {counties:99, tracts:825},
+        'Kansas':         {counties:88, tracts:314},
+        'Kentucky':       {counties:91, tracts:690},
+        'Louisiana':      {counties:27, tracts:329},
+        'Maine':          {counties:9,  tracts:112},
+        'Maryland':       {counties:1,  tracts:218},
+        'Massachusetts':  {counties:11, tracts:1082},
+        'Michigan':       {counties:45, tracts:825},
+        'Minnesota':      {counties:81, tracts:1189},
+        'Mississippi':    {counties:0,  tracts:0},
+        'Missouri':       {counties:115,tracts:1393},
+        'Montana':        {counties:46, tracts:165},
+        'Nebraska':       {counties:83, tracts:512},
+        'Nevada':         {counties:13, tracts:175},
+        'New Hampshire':  {counties:0,  tracts:0},
+        'New Jersey':     {counties:20, tracts:1984},
+        'New Mexico':     {counties:26, tracts:310},
+        'New York':       {counties:5,  tracts:2168},
+        'North Carolina': {counties:100,tracts:2195},
+        'North Dakota':   {counties:0,  tracts:0},
+        'Ohio':           {counties:84, tracts:2893},
+        'Oklahoma':       {counties:46, tracts:197},
+        'Oregon':         {counties:36, tracts:834},
+        'Pennsylvania':   {counties:57, tracts:2949},
+        'Rhode Island':   {counties:3,  tracts:194},
+        'South Carolina': {counties:41, tracts:959},
+        'South Dakota':   {counties:0,  tracts:0},
+        'Tennessee':      {counties:28, tracts:101},
+        'Texas':          {counties:168,tracts:3764},
+        'Utah':           {counties:29, tracts:588},
+        'Vermont':        {counties:5,  tracts:32},
+        'Virginia':       {counties:105,tracts:1605},
+        'Washington':     {counties:38, tracts:1408},
+        'West Virginia':  {counties:0,  tracts:0},
+        'Wisconsin':      {counties:72, tracts:1409},
+        'Wyoming':        {counties:20, tracts:81},
+    };
+
+    // Expected census tract counts per state (Census 2020 definitions)
+    const EXPECTED_TRACTS = {
+        'Alabama':1181,'Alaska':167,'Arizona':1529,'Arkansas':706,'California':9129,
+        'Colorado':1249,'Connecticut':833,'Delaware':218,'District of Columbia':179,
+        'Florida':4245,'Georgia':1969,'Hawaii':351,'Idaho':298,'Illinois':3123,
+        'Indiana':1511,'Iowa':825,'Kansas':782,'Kentucky':1115,'Louisiana':1145,
+        'Maine':358,'Maryland':1406,'Massachusetts':1478,'Michigan':2813,'Minnesota':1334,
+        'Mississippi':664,'Missouri':1393,'Montana':271,'Nebraska':512,'Nevada':702,
+        'New Hampshire':295,'New Jersey':2010,'New Mexico':499,'New York':5325,
+        'North Carolina':2195,'North Dakota':205,'Ohio':2936,'Oklahoma':871,
+        'Oregon':834,'Pennsylvania':3218,'Rhode Island':244,'South Carolina':959,
+        'South Dakota':179,'Tennessee':1383,'Texas':5265,'Utah':588,'Vermont':184,
+        'Virginia':1907,'Washington':1458,'West Virginia':444,'Wisconsin':1409,'Wyoming':81
+    };
+
+    function evictionCoverageFor(stateFips) {
+        const name = stateData[stateFips]?.name;
+        if (!name) return { tracts: false, county: false, needsAgg: false };
+        const cov = EVICTION_COVERAGE[name];
+        if (!cov) return { tracts: false, county: false, needsAgg: false };
+        const tractPct  = cov.tracts   / (EXPECTED_TRACTS[name]   || 1);
+        const countyPct = cov.counties / (EXPECTED_COUNTIES[name] || 1);
+        const tractsOk  = tractPct >= 0.67;
+        // County enabled whenever tracts are OK — thin county coverage falls back to tract aggregation.
+        // CT always aggregates from tracts (planning regions don't match legacy county FIPS).
+        const needsAgg  = tractsOk && (countyPct < 0.67 || stateFips === '09');
+        const countyOk  = tractsOk;  // always enabled if tracts qualify; county view uses agg if needed
+        return { tracts: tractsOk, county: countyOk, needsAgg };
+    }
+
+    // =============================================
+    // Load state: Census + LAI + TIGERweb
+    // =============================================
+    async function loadStateData() {
+        if (!currentStateFips || !censusApiKey) return;
+        const loading = document.getElementById('loadingIndicator');
+        const errorEl = document.getElementById('errorMessage');
+        const statusEl = document.getElementById('statusInfo');
+        const loadBtn = document.getElementById('loadDataBtn');
+        loading.classList.add('active'); errorEl.classList.remove('active'); statusEl.style.display = 'none'; loadBtn.disabled = true;
+
+        try {
+            if (geojson) { map.removeLayer(geojson); geojson = null; }
+            if (tractLayer) { map.removeLayer(tractLayer); tractLayer = null; }
+
+            // 1. Census county housing data (bracket-counting)
+            document.getElementById('loadingText').textContent = '📊 1/3 Loading Census housing data...';
+            const cVars = 'NAME,B25070_001E,B25070_007E,B25070_008E,B25070_009E,B25070_010E,B25070_011E,B25091_001E,B25091_008E,B25091_009E,B25091_010E,B25091_011E,B25091_012E,B25091_015E,B25091_016E,B25091_017E,B25091_018E,B25091_019E,B25091_020E,B01003_001E,B25001_001E';
+            const cUrl = `https://api.census.gov/data/2022/acs/acs5?get=${cVars}&for=county:*&in=state:${currentStateFips}&key=${censusApiKey}`;
+            const cResp = await fetch(cUrl);
+            if (!cResp.ok) throw new Error(cResp.status === 400 ? 'Invalid API key' : 'Census error: '+cResp.status);
+            const cRaw = await cResp.json();
+
+            // Build column index map from header row
+            const cHeaders = cRaw[0];
+            const cIdx = {};
+            cHeaders.forEach((h, i) => { cIdx[h] = i; });
+            const countyIdxMap = {
+                r_total:    cIdx['B25070_001E'], r_007: cIdx['B25070_007E'], r_008: cIdx['B25070_008E'],
+                r_009:      cIdx['B25070_009E'], r_010: cIdx['B25070_010E'], r_notcomp: cIdx['B25070_011E'],
+                o_total:    cIdx['B25091_001E'], o_008: cIdx['B25091_008E'], o_009: cIdx['B25091_009E'],
+                o_010:      cIdx['B25091_010E'], o_011: cIdx['B25091_011E'], o_notcomp_m: cIdx['B25091_012E'],
+                o_015:      cIdx['B25091_015E'], o_016: cIdx['B25091_016E'], o_017: cIdx['B25091_017E'],
+                o_018:      cIdx['B25091_018E'], o_019: cIdx['B25091_019E'], o_notcomp_nm: cIdx['B25091_020E'],
+            };
+
+            // 2. LAI per county (avoids ArcGIS state-level record cap on large states like CA)
+            const countyFipsList = cRaw.slice(1).map(row => row[row.length - 1]); // last col = county fips
+            document.getElementById('loadingText').textContent = `📊 2/3 Loading HUD LAI transport data (0/${countyFipsList.length} counties)...`;
+            const laiFeatures = await fetchLAIForState(
+                currentStateFips,
+                countyFipsList,
+                (i, total, fips) => {
+                    document.getElementById('loadingText').textContent = `📊 2/3 Loading HUD LAI transport data (${i+1}/${total} counties)...`;
+                }
+            );
+            laiTractCache = {};
+            laiFeatures.forEach(f => {
+                // TRACT and COUNTY are already zero-padded strings from the ArcGIS service
+                // (confirmed: TRACT is esriFieldTypeString length 6, COUNTY length 3)
+                const key = f.attributes.COUNTY + f.attributes.TRACT;
+                laiTractCache[key] = processLAIFeature(f.attributes);
+                // CT: TIGERweb uses new planning region county codes (110-190) but LAI uses
+                // legacy codes (001-015). Also index by tract alone so lookup works either way.
+                if (currentStateFips === '09') {
+                    laiTractCache[f.attributes.TRACT] = laiTractCache[key];
+                }
+            });
+
+            // Aggregate LAI to county using population-weighted average.
+            // For CT: LAI uses legacy county codes but Census/TIGERweb use planning region codes (110-190).
+            // We fetch CT tract populations from Census to weight the aggregation and group by planning region.
+            const countyLAI = {};
+            if (currentStateFips === '09') {
+                // Fetch all CT tract populations to use as weights and get planning region mapping
+                const ctPopUrl = `https://api.census.gov/data/2022/acs/acs5?get=B01003_001E&for=tract:*&in=state:09&key=${censusApiKey}`;
+                const ctPopResp = await fetch(ctPopUrl);
+                const ctPopRaw = await ctPopResp.json();
+                // Build map: tract → { planningRegion, population }
+                const tractMeta = {};
+                ctTractToRegion = {};
+                for (let i = 1; i < ctPopRaw.length; i++) {
+                    const [pop, , county, tract] = ctPopRaw[i];
+                    tractMeta[tract] = { planningRegion: county, population: parseInt(pop) || 0 };
+                    ctTractToRegion[tract] = county;
+                }
+                // Aggregate LAI features into planning regions by matching on tract number
+                laiFeatures.forEach(f => {
+                    const tractNum = f.attributes.TRACT;
+                    const meta = tractMeta[tractNum];
+                    if (!meta) return;
+                    const pr = meta.planningRegion;
+                    const p = processLAIFeature(f.attributes);
+                    if (p.transportPct == null) return;
+                    if (!countyLAI[pr]) countyLAI[pr] = [];
+                    countyLAI[pr].push({ ...p, population: meta.population });
+                });
+            } else {
+                // All other states: population-weighted average using LAI's own area_median_hh_income
+                // as a proxy weight (or equal weight if unavailable)
+                laiFeatures.forEach(f => {
+                    const cty = f.attributes.COUNTY;
+                    if (!countyLAI[cty]) countyLAI[cty] = [];
+                    const p = processLAIFeature(f.attributes);
+                    if (p.transportPct != null) countyLAI[cty].push(p);
+                });
+            }
+
+            // Weighted average helper
+            function weightedAvg(tracts, field, weightField) {
+                const valid = tracts.filter(t => t[field] != null);
+                if (!valid.length) return null;
+                const totalW = valid.reduce((s, t) => s + (t[weightField] || 1), 0);
+                if (totalW === 0) return null;
+                const sum = valid.reduce((s, t) => s + t[field] * (t[weightField] || 1), 0);
+                return Math.round((sum / totalW) * 10) / 10;
+            }
+
+            // Build county data
+            countyData = {};
+            for (let i = 1; i < cRaw.length; i++) {
+                const row = cRaw[i];
+                const name = row[cIdx['NAME']];
+                const state  = row[cIdx['state']];
+                const county = row[cIdx['county']];
+                const totalPop      = parseInt(row[cIdx['B01003_001E']]) || 0;
+                const housingUnits  = parseInt(row[cIdx['B25001_001E']]) || 0;
+                const hb = burdenFromBrackets(row, countyIdxMap);
+
+                const laiTracts = countyLAI[county] || [];
+                const avgT = weightedAvg(laiTracts, 'transportPct', 'population')
+                    ?? (laiTracts.length > 0 ? Math.round((laiTracts.reduce((s,t)=>s+t.transportPct,0)/laiTracts.length)*10)/10 : null);
+                const avgTCost = laiTracts.length > 0 ? laiTracts.reduce((s,t)=>s+(t.transportCost||0),0)/laiTracts.length : null;
+                const profileCounts = {};
+                laiTracts.forEach(t => { profileCounts[t.profileId] = (profileCounts[t.profileId]||0)+1; });
+                const topProfile = Object.entries(profileCounts).sort((a,b)=>b[1]-a[1])[0];
+
+                const shortName = name.replace(', '+stateData[currentStateFips].name, '')
+                    .replace(/ County| city| Parish| Borough| Census Area| Municipality/g, '');
+
+                countyData[county] = {
+                    name: shortName, housingBurden: hb,
+                    transportPct: avgT, transportCost: avgTCost,
+                    profileId: topProfile ? parseInt(topProfile[0]) : null,
+                    laiTracts: laiTracts.length,
+                    bivarColor: getBivarColor(hb, avgT)
+                };
+            }
+
+            // 3. County boundaries
+            document.getElementById('loadingText').textContent = '📊 3/3 Loading county boundaries...';
+            const gUrl = `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1/query?where=STATE%3D%27${currentStateFips}%27&outFields=*&returnGeometry=true&outSR=4326&f=geojson`;
+            const gResp = await fetch(gUrl);
+            if (!gResp.ok) throw new Error('TIGERweb county boundary error');
+            const gData = await gResp.json();
+            if (!gData.features || !gData.features.length) throw new Error('No county boundaries');
+
+            geojson = L.geoJson(gData, { style: styleCounty, onEachFeature: onEachCounty }).addTo(map);
+            map.fitBounds(geojson.getBounds());
+
+            currentView = 'county'; currentCountyFips = null;
+            document.getElementById('resetButton').style.display = 'none';
+            document.getElementById('legendSection').style.display = '';
+            document.getElementById('methodNote').style.display = '';
+            document.getElementById('nameHeader').textContent = 'County';
+            statusEl.style.display = 'block';
+            statusEl.innerHTML = `<strong>✓ Loaded:</strong> ${Object.keys(countyData).length} counties · ${laiFeatures.length} LAI tracts · ACS 2022 + LAI v3`;
+            // Reset eviction state when new state is loaded — show panel immediately
+            evictionLoaded = false;
+            evictionCountyCache = {};
+            evictionTractCache  = {};
+            // Note: ctTractToRegion is LAI data populated earlier in loadStateData — do not reset here
+            tractDataPrefetchPromise = null;
+            if (hatchLayer) { map.removeLayer(hatchLayer); hatchLayer = null; }
+            document.getElementById('evictionToggleRow').style.display = 'flex';
+            const et = document.getElementById('evictionToggle');
+            const evCov = evictionCoverageFor(currentStateFips);
+            evictionNeedsCountyAgg = evCov.needsAgg;
+            // Preserve overlay on/off intent across state changes — only turn off if new state has no data
+            const keepOverlayOn = evictionOverlayActive && evCov.county;
+            evictionOverlayActive = keepOverlayOn;
+            if (et) { et.checked = keepOverlayOn; et.disabled = !evCov.county; }
+            // For states where county eviction comes from tract aggregation, prefetch all
+            // tract Census data in the background so population weights are ready immediately.
+            tractDataPrefetchPromise = evCov.needsAgg ? prefetchAllTractCensusData() : Promise.resolve();
+            document.getElementById('evictionLegend').style.display = keepOverlayOn ? 'block' : 'none';
+            document.getElementById('evictionHeader').style.display = keepOverlayOn ? '' : 'none';
+            computeRanges(countyData);
+            Object.values(countyData).forEach(d => {
+                d.bivarColor = getBivarColor(d.housingBurden, d.transportPct);
+            });
+            if (geojson) geojson.setStyle(styleCounty);
+            buildLegend();
+            populateTable();
+            if (keepOverlayOn) toggleEvictionOverlay(true);
+        } catch(err) {
+            errorEl.textContent = '❌ '+err.message; errorEl.classList.add('active');
+        } finally { loading.classList.remove('active'); loadBtn.disabled = false; }
+    }
+
+    // =============================================
+    // County layer
+    // =============================================
+    function styleCounty(f) {
+        const d = countyData[f.properties.COUNTY];
+        return { fillColor: d ? d.bivarColor : '#d0d0d0', weight: 2, opacity: 1, color: 'white', fillOpacity: 0.75 };
+    }
+    function onEachCounty(f, layer) {
+        layer.on({
+            mouseover: function(e) { e.target.setStyle({weight:3,color:'#333',fillOpacity:0.9}); e.target.bringToFront(); const d=countyData[f.properties.COUNTY]; if(d) info.update(d); },
+            mouseout: function(e) { geojson.resetStyle(e.target); info.update(); },
+            click: function() { loadTractData(f.properties.COUNTY, layer.getBounds()); }
+        });
+    }
+
+    // =============================================
+    // Tract drill-down
+    // =============================================
+    async function loadTractData(countyFips, bounds) {
+        const loading = document.getElementById('loadingIndicator');
+        const errorEl = document.getElementById('errorMessage');
+        loading.classList.add('active'); errorEl.classList.remove('active');
+
+        try {
+            document.getElementById('loadingText').textContent = '📊 Loading tract data...';
+            const cVars = 'NAME,B25070_001E,B25070_007E,B25070_008E,B25070_009E,B25070_010E,B25070_011E,B25091_001E,B25091_008E,B25091_009E,B25091_010E,B25091_011E,B25091_012E,B25091_015E,B25091_016E,B25091_017E,B25091_018E,B25091_019E,B25091_020E,B01003_001E,B25001_001E';
+            const url = `https://api.census.gov/data/2022/acs/acs5?get=${cVars}&for=tract:*&in=state:${currentStateFips}%20county:${countyFips}&key=${censusApiKey}`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('Census tract query failed');
+            const raw = await resp.json();
+
+            const tHeaders = raw[0];
+            const tIdx = {};
+            tHeaders.forEach((h, i) => { tIdx[h] = i; });
+            const tractIdxMap = {
+                r_total:    tIdx['B25070_001E'], r_007: tIdx['B25070_007E'], r_008: tIdx['B25070_008E'],
+                r_009:      tIdx['B25070_009E'], r_010: tIdx['B25070_010E'], r_notcomp: tIdx['B25070_011E'],
+                o_total:    tIdx['B25091_001E'], o_008: tIdx['B25091_008E'], o_009: tIdx['B25091_009E'],
+                o_010:      tIdx['B25091_010E'], o_011: tIdx['B25091_011E'], o_notcomp_m: tIdx['B25091_012E'],
+                o_015:      tIdx['B25091_015E'], o_016: tIdx['B25091_016E'], o_017: tIdx['B25091_017E'],
+                o_018:      tIdx['B25091_018E'], o_019: tIdx['B25091_019E'], o_notcomp_nm: tIdx['B25091_020E'],
+            };
+
+            tractData = {};
+            for (let i = 1; i < raw.length; i++) {
+                const row = raw[i];
+                const county = row[tIdx['county']], tract = row[tIdx['tract']];
+                const pop   = parseInt(row[tIdx['B01003_001E']]) || 0;
+                const units = parseInt(row[tIdx['B25001_001E']]) || 0;
+                const hb = burdenFromBrackets(row, tractIdxMap);
+                const tid = county + tract;
+                // CT: LAI indexed by tract-only since county codes differ (legacy vs planning region)
+                const lai = laiTractCache[tid] || (currentStateFips === '09' ? laiTractCache[tract] : null);
+                // Fall back to county average if tract-level LAI is missing
+                const countyFallback = countyData[county] || {};
+                const transportPct = (lai && lai.transportPct != null) ? lai.transportPct
+                    : (countyFallback.transportPct != null ? countyFallback.transportPct : null);
+                const transportCost = (lai && lai.transportCost != null) ? lai.transportCost
+                    : (countyFallback.transportCost != null ? countyFallback.transportCost : null);
+                const usedFallback = (!lai || lai.transportPct == null) && transportPct != null;
+                const isSparse = pop < 100 || units < 50;
+
+                tractData[tid] = {
+                    name: 'Tract '+tract, housingBurden: hb,
+                    transportPct, transportCost,
+                    profileId: lai ? (lai.profileId||null) : null,
+                    incomeRatio: lai ? (lai.incomeRatio||null) : null,
+                    transportFallback: usedFallback,
+                    bivarColor: getBivarColor(hb, transportPct),
+                    population: pop, housingUnits: units, isSparse
+                };
+            }
+
+            document.getElementById('loadingText').textContent = '📊 Loading tract boundaries...';
+            const gUrl = `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/0/query?where=STATE%3D%27${currentStateFips}%27+AND+COUNTY%3D%27${countyFips}%27&outFields=*&returnGeometry=true&outSR=4326&f=geojson`;
+            const gResp = await fetch(gUrl);
+            if (!gResp.ok) throw new Error('TIGERweb tract boundary error');
+            const gData = await gResp.json();
+
+            if (geojson) map.removeLayer(geojson);
+            tractLayer = L.geoJson(gData, { style: styleTract, onEachFeature: onEachTract }).addTo(map);
+            map.fitBounds(bounds);
+
+            currentView = 'tract'; currentCountyFips = countyFips;
+            document.getElementById('resetButton').style.display = 'block';
+            document.getElementById('nameHeader').textContent = 'Tract';
+            // Eviction panel stays visible — enabled for all states with national data
+            const etTract = document.getElementById('evictionToggle');
+            const evCovT = evictionCoverageFor(currentStateFips);
+            if (etTract) etTract.disabled = !evCovT.tracts;
+
+            // Recompute dynamic ranges from this county's tracts, recolor, rebuild legend
+            computeRanges(tractData);
+            Object.values(tractData).forEach(d => {
+                if (!d.isSparse) d.bivarColor = getBivarColor(d.housingBurden, d.transportPct);
+            });
+            // Re-style the tract layer with updated colors
+            if (tractLayer) tractLayer.setStyle(styleTract);
+            buildLegend();
+            info.update(); populateTable();
+
+            // Re-render eviction hatch at tract level if overlay is active
+            maybeRenderHatchOnTract(gData);
+        } catch(err) {
+            errorEl.textContent = '❌ '+err.message; errorEl.classList.add('active');
+        } finally { loading.classList.remove('active'); }
+    }
+
+    function styleTract(f) {
+        const tid = f.properties.COUNTY+f.properties.TRACT;
+        const d = tractData[tid];
+        if (d && d.isSparse) return { fillColor: 'transparent', weight: 0, opacity: 0, color: 'transparent', fillOpacity: 0, interactive: false };
+        return { fillColor: d ? d.bivarColor : '#d0d0d0', weight: 1, opacity: 1, color: '#888', fillOpacity: 0.78 };
+    }
+    function onEachTract(f, layer) {
+        const tid = f.properties.COUNTY+f.properties.TRACT;
+        if (tractData[tid] && tractData[tid].isSparse) return; // no interactions for sparse tracts
+        layer.on({
+            mouseover: function(e) { e.target.setStyle({weight:3,color:'#333',fillOpacity:0.9}); e.target.bringToFront(); const d=tractData[f.properties.COUNTY+f.properties.TRACT]; if(d) info.update(d); },
+            mouseout: function(e) { if(tractLayer) tractLayer.resetStyle(e.target); info.update(); },
+            click: function(e) { if(e.originalEvent.detail===2) resetToCountyView(); }
+        });
+    }
+
+    // =============================================
+    // Navigation
+    // =============================================
+    window.resetToCountyView = function() {
+        if (tractLayer) { map.removeLayer(tractLayer); tractLayer = null; }
+        if (hatchLayer) { map.removeLayer(hatchLayer); hatchLayer = null; }
+        if (geojson) { geojson.addTo(map); map.fitBounds(geojson.getBounds()); }
+        currentView = 'county'; currentCountyFips = null;
+        document.getElementById('resetButton').style.display = 'none';
+        document.getElementById('nameHeader').textContent = 'County';
+        document.getElementById('evictionToggleRow').style.display = 'flex';
+        computeRanges(countyData);
+        Object.values(countyData).forEach(d => { d.bivarColor = getBivarColor(d.housingBurden, d.transportPct); });
+        if (geojson) geojson.setStyle(styleCounty);
+        buildLegend();
+        info.update(); populateTable();
+        // Re-render county hatch if overlay is still active
+        if (evictionOverlayActive && evictionLoaded && geojson) {
+            attachEvictionRates();
+            renderHatchLayer(geojson.toGeoJSON(), f => f.properties.COUNTY);
+        }
+    };
+
+    // =============================================
+    // Table
+    // =============================================
+    function populateTable() {
+        const tbody = document.getElementById('tableBody'); tbody.innerHTML = '';
+        const data = currentView === 'county' ? countyData : tractData;
+        const showEvict = evictionOverlayActive;
+        const evictHeader = document.getElementById('evictionHeader');
+        if (evictHeader) evictHeader.style.display = showEvict ? '' : 'none';
+        let sorted = Object.entries(data)
+            .filter(([,d]) => !d.isSparse && (d.housingBurden != null || d.transportPct != null))
+            .sort((a,b) => {
+                const as = getHC(a[1].housingBurden)+getTC(a[1].transportPct);
+                const bs = getHC(b[1].housingBurden)+getTC(b[1].transportPct);
+                return bs - as || (b[1].housingBurden||0)-(a[1].housingBurden||0);
+            });
+        sorted.forEach(([fips, d]) => {
+            const row = document.createElement('tr');
+            const pb = d.profileId ? `<span class="hh-badge">hh${d.profileId}</span>` : '';
+            const evictCol = showEvict
+                ? `<td style="text-align:right;color:#7a3a00;font-weight:600">${d.evictionRate != null ? d.evictionRate+'%' : '—'}</td>`
+                : '';
+            row.innerHTML = `
+                <td><span class="color-indicator" style="background:${d.bivarColor}"></span><span class="county-name">${d.name}</span></td>
+                <td style="text-align:right">${d.housingBurden != null ? d.housingBurden+'%' : '—'}</td>
+                <td style="text-align:right">${d.transportPct != null ? d.transportPct+'%' : '—'}</td>
+                ${evictCol}
+                <td style="text-align:right">${pb}</td>`;
+            if (currentView === 'county') {
+                row.addEventListener('click', () => {
+                    if (geojson) geojson.eachLayer(layer => {
+                        if (layer.feature.properties.COUNTY === fips) loadTractData(fips, layer.getBounds());
+                    });
+                });
+            }
+            tbody.appendChild(row);
+        });
+    }
+    // =============================================
+    // Eviction overlay: fetch, parse, render
+    // =============================================
+
+    // National files fetched once, cached globally across state loads
+    let evictionNationalTractText  = null;
+    let evictionNationalCountyText = null;
+
+    async function fetchEvictionData(stateFips) {
+        // Fetch national files once, then parse filtered to current state
+        if (!evictionNationalTractText) {
+            const [tResp, cResp] = await Promise.all([
+                fetch(EVICTION_TRACT_URL),
+                fetch(EVICTION_COUNTY_URL)
+            ]);
+            if (!tResp.ok)  throw new Error(`Eviction tract file fetch failed (${tResp.status})`);
+            if (!cResp.ok)  throw new Error(`Eviction county file fetch failed (${cResp.status})`);
+            evictionNationalTractText  = await tResp.text();
+            evictionNationalCountyText = await cResp.text();
+        }
+        evictionTractCache  = {};
+        evictionCountyCache = {};
+        parseProprietaryCSV(evictionNationalTractText,  evictionTractCache,  stateFips, 'fips',   11);
+        parseProprietaryCSV(evictionNationalCountyText, evictionCountyCache, stateFips, 'cofips',  5);
+    }
+
+    function parseCSVLine(line) {
+        const cols = [];
+        let cur = '', inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') { inQuote = !inQuote; }
+            else if (ch === ',' && !inQuote) { cols.push(cur); cur = ''; }
+            else if (ch === '\r') { /* skip CR */ }
+            else { cur += ch; }
+        }
+        cols.push(cur);
+        return cols;
+    }
+
+    // Parse the proprietary national CSV, filtering to one state and keeping latest year per GEOID
+    // geoidCol: 'fips' (tracts) or 'cofips' (counties)
+    function parseProprietaryCSV(csvText, cache, stateFips, geoidCol, geoidLen) {
+        const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+        if (lines.length < 2) return;
+        const headers  = lines[0].split(',').map(h => h.trim());
+        const geoidIdx = headers.indexOf(geoidCol);
+        const yearIdx  = headers.indexOf('year');
+        const rateIdx  = headers.indexOf('filing_rate');
+        const stateIdx = headers.indexOf('state');
+        if (geoidIdx < 0 || yearIdx < 0 || rateIdx < 0) { return; }
+        const stateEntry = stateData[stateFips];
+        const stateName  = stateEntry ? stateEntry.name : null;
+        const yearSeen = {};
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line) continue;
+            // Fast pre-filter: skip lines that don't mention the state name at all
+            if (stateName && !line.includes(stateName)) continue;
+            // Proper parse to handle quoted fields containing commas (e.g. "Baltimore County, Maryland")
+            const cols = parseCSVLine(line);
+            if (stateIdx >= 0 && cols[stateIdx] !== stateName) continue;
+            const rate = parseFloat(cols[rateIdx]);
+            if (isNaN(rate) || rate < 0) continue;
+            const geoid = cols[geoidIdx].trim().padStart(geoidLen, '0');
+            const year  = parseInt(cols[yearIdx]);
+            if (!yearSeen[geoid] || year > yearSeen[geoid]) {
+                yearSeen[geoid] = year;
+                cache[geoid] = rate;
+                // CT: TIGERweb uses new planning region county codes but eviction CSV uses legacy
+                // codes embedded in the fips. Also index by the last 6 chars (tract) alone.
+                if (stateFips === '09' && geoidLen === 11) {
+                    cache[geoid.slice(5)] = rate;
+                }
+            }
+        }
+    }
+
+    function computeEvictionCoverage(tractText, countyText) {
+        // Count unique tracts and counties per state name across both national files
+        const tractLines  = tractText.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+        const countyLines = countyText.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+
+        // Tract file: fips,cofips,tract,county,state,...  → state at index 4
+        const tractsByState = {};
+        for (let i = 1; i < tractLines.length; i++) {
+            const line = tractLines[i]; if (!line) continue;
+            const cols = line.split(',');
+            const state = cols[4]; if (!state) continue;
+            if (!tractsByState[state]) tractsByState[state] = new Set();
+            tractsByState[state].add(cols[0]);  // unique tract fips
+        }
+
+        // County file: cofips,county,state,...  → state at index 2
+        const countiesByState = {};
+        for (let i = 1; i < countyLines.length; i++) {
+            const line = countyLines[i]; if (!line) continue;
+            const cols = line.split(',');
+            const state = cols[2]; if (!state) continue;
+            if (!countiesByState[state]) countiesByState[state] = new Set();
+            countiesByState[state].add(cols[0]);  // unique cofips
+        }
+
+        const allStates = new Set([...Object.keys(tractsByState), ...Object.keys(countiesByState)]);
+        allStates.forEach(state => {
+            evictionCoverageByState[state] = {
+                tracts:   (tractsByState[state]   || new Set()).size,
+                counties: (countiesByState[state] || new Set()).size
+            };
+        });
+    }
+
+    function injectSvgPatterns() {
+        // Re-inject after layer changes — Leaflet may recreate its SVG element
+        const mapEl = document.getElementById('map');
+        let svgEl = mapEl ? mapEl.querySelector('svg') : null;
+        if (!svgEl) return;
+        if (svgEl.querySelector('#hatch-1')) return; // already injected
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        defs.innerHTML = `
+            <pattern id="hatch-1" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#a05000" stroke-width="1.3" stroke-opacity="0.7"/>
+            </pattern>
+            <pattern id="hatch-2" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="5" stroke="#a05000" stroke-width="1.5" stroke-opacity="0.75"/>
+            </pattern>
+            <pattern id="hatch-3" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="5" stroke="#a05000" stroke-width="1.5" stroke-opacity="0.8"/>
+                <line x1="0" y1="0" x2="5" y2="0" stroke="#a05000" stroke-width="1.5" stroke-opacity="0.8"/>
+            </pattern>
+        `;
+        svgEl.insertBefore(defs, svgEl.firstChild);
+    }
+
+    function getEvictionRate(fips) {
+        if (currentView === 'tract') {
+            const geoid = currentStateFips + fips;   // state(2) + county(3) + tract(6) = 11
+            // CT: eviction CSV uses legacy county codes; TIGERweb uses planning region codes.
+            // Fall back to tract-only key (last 6 chars of fips) for CT.
+            return evictionTractCache[geoid] != null ? evictionTractCache[geoid]
+                 : (currentStateFips === '09' ? (evictionTractCache[fips.slice(3)] ?? null) : null);
+        } else {
+            // County view: read from countyData which has been aggregated (including CT pop-weighted)
+            return countyData[fips]?.evictionRate ?? null;
+        }
+    }
+
+    function hatchStyleFor(fips) {
+        const er = getEvictionRate(fips);
+        const level = getHatchClass(er);
+        if (level === 0) return { fill: 'none', fillOpacity: 0, stroke: 'none', weight: 0, interactive: false };
+        return {
+            fillColor: `url(#hatch-${level})`,
+            fillOpacity: 1,
+            stroke: false,
+            weight: 0,
+            interactive: false
+        };
+    }
+
+    function renderHatchLayer(geoData, getFips) {
+        injectSvgPatterns();
+        if (hatchLayer) { map.removeLayer(hatchLayer); hatchLayer = null; }
+        hatchLayer = L.geoJson(geoData, {
+            style: (f) => hatchStyleFor(getFips(f)),
+            onEachFeature: () => {}
+        }).addTo(map);
+    }
+
+    function attachEvictionRates() {
+        if (currentView === 'county') {
+            if (evictionNeedsCountyAgg) {
+                // County CSV coverage is thin (or CT planning regions don't match legacy FIPS).
+                // Aggregate tract-level rates up to counties/regions, weighted by tract population.
+                // CT uses ctTractToRegion for the county grouping key; all others use tractData tid prefix.
+                const isCT = currentStateFips === '09';
+                const popAccum = {};
+
+                if (isCT) {
+                    // CT: evictionTractCache has two keys per tract:
+                    //   full 11-char (e.g. "09003510100") and 6-char tract-only (e.g. "510100")
+                    // ctTractToRegion maps 6-char tract → planning region FIPS (e.g. "130")
+                    const ctKeys = Object.keys(ctTractToRegion);
+                    const ctEvKeys = Object.keys(evictionTractCache).filter(k => k.length === 6);
+                    ctKeys.forEach(tractNum => {
+                        const er = evictionTractCache[tractNum];
+                        if (er == null) return;
+                        const pr = ctTractToRegion[tractNum];
+                        // Prefer prefetched/drilled tractData for population; fall back to 1
+                        const tractKey = Object.keys(tractData).find(tid => tid.slice(3) === tractNum);
+                        const pop = tractKey ? (tractData[tractKey].population || 1) : 1;
+                        if (!popAccum[pr]) popAccum[pr] = { weightedSum: 0, totalWeight: 0 };
+                        popAccum[pr].weightedSum += er * pop;
+                        popAccum[pr].totalWeight += pop;
+                    });
+                } else {
+                    // Other states with thin county coverage: aggregate from evictionTractCache.
+                    // Use tractData population weights if prefetch has run; otherwise equal-weight.
+                    Object.keys(evictionTractCache).forEach(geoid => {
+                        if (geoid.length !== 11) return;
+                        const countyFips = geoid.slice(2, 5);
+                        const er = evictionTractCache[geoid];
+                        if (er == null || !countyData[countyFips]) return;
+                        const tid = countyFips + geoid.slice(5);  // county(3)+tract(6)
+                        const pop = tractData[tid]?.population || 1;
+                        if (!popAccum[countyFips]) popAccum[countyFips] = { weightedSum: 0, totalWeight: 0 };
+                        popAccum[countyFips].weightedSum += er * pop;
+                        popAccum[countyFips].totalWeight += pop;
+                    });
+                }
+
+                Object.keys(countyData).forEach(key => {
+                    const a = popAccum[key];
+                    countyData[key].evictionRate = a && a.totalWeight > 0
+                        ? Math.round((a.weightedSum / a.totalWeight) * 10) / 10 : null;
+                });
+            } else {
+                // County CSV has sufficient coverage — use it directly
+                Object.keys(countyData).forEach(fips => {
+                    const geoid = (currentStateFips + fips).padStart(5, '0');
+                    const er = evictionCountyCache[geoid];
+                    countyData[fips].evictionRate = er != null ? Math.round(er * 10) / 10 : null;
+                });
+            }
+        } else {
+            Object.keys(tractData).forEach(tid => {
+                const geoid = currentStateFips + tid;
+                // CT: eviction CSV uses legacy county codes; fall back to tract-only key
+                const er = evictionTractCache[geoid]
+                    ?? (currentStateFips === '09' ? evictionTractCache[tid.slice(3)] : null);
+                tractData[tid].evictionRate = er != null ? Math.round(er * 10) / 10 : null;
+            });
+        }
+        populateTable();
+    }
+
+    window.toggleEvictionOverlay = async function(checked) {
+        evictionOverlayActive = checked;
+        document.getElementById('evictionLegend').style.display = checked ? 'block' : 'none';
+        document.getElementById('evictionHeader').style.display = checked ? '' : 'none';
+
+        if (!checked) {
+            if (hatchLayer) { map.removeLayer(hatchLayer); hatchLayer = null; }
+            Object.values(tractData).forEach(v => { v.evictionRate = null; });
+            Object.values(countyData).forEach(v => { v.evictionRate = null; });
+            populateTable();
+            return;
+        }
+
+        const loading = document.getElementById('loadingIndicator');
+        const errorEl = document.getElementById('errorMessage');
+        document.getElementById('loadingText').textContent = '🏠 Loading Eviction Lab data...';
+        loading.classList.add('active');
+        errorEl.classList.remove('active');
+
+        try {
+            if (!evictionLoaded) {
+                await fetchEvictionData(currentStateFips);
+                evictionLoaded = true;
+            }
+            // Await background tract prefetch so county aggregation uses population weights
+            if (evictionNeedsCountyAgg && tractDataPrefetchPromise) {
+                await tractDataPrefetchPromise;
+            }
+            // Attach rates first so hatchStyleFor reads populated evictionRate values
+            attachEvictionRates();
+            if (currentView === 'tract' && tractLayer) {
+                renderHatchLayer(tractLayer.toGeoJSON(), f => f.properties.COUNTY + f.properties.TRACT);
+            } else if (currentView === 'county' && geojson) {
+                renderHatchLayer(geojson.toGeoJSON(), f => f.properties.COUNTY);
+            }
+        } catch (err) {
+            errorEl.textContent = '❌ Eviction data: ' + err.message;
+            errorEl.classList.add('active');
+            const et = document.getElementById('evictionToggle');
+            et.checked = false;
+            et.disabled = true;
+            evictionOverlayActive = false;
+            document.getElementById('evictionLegend').style.display = 'none';
+            document.getElementById('evictionHeader').style.display = 'none';
+        } finally {
+            loading.classList.remove('active');
+        }
+    };
+
+    // Prefetch Census tract data for all counties in the background.
+    // Used for needsAgg states so county eviction overlay uses real population weights.
+    // Populates tractData without touching the map or TIGERweb.
+    async function prefetchAllTractCensusData() {
+        const counties = Object.keys(countyData);
+        const stateFips = currentStateFips;
+        const cVars = 'NAME,B25070_001E,B25070_007E,B25070_008E,B25070_009E,B25070_010E,B25070_011E,B25091_001E,B25091_008E,B25091_009E,B25091_010E,B25091_011E,B25091_012E,B25091_015E,B25091_016E,B25091_017E,B25091_018E,B25091_019E,B25091_020E,B01003_001E,B25001_001E';
+
+        // Fetch all counties in parallel (browsers cap concurrent requests anyway)
+        const results = await Promise.allSettled(
+            counties.map(async countyFips => {
+                const url = `https://api.census.gov/data/2022/acs/acs5?get=${cVars}&for=tract:*&in=state:${stateFips}%20county:${countyFips}&key=${censusApiKey}`;
+                const resp = await fetch(url);
+                if (!resp.ok) return null;
+                return { countyFips, raw: await resp.json() };
+            })
+        );
+
+        // Bail out if state changed while fetching
+        if (currentStateFips !== stateFips) return;
+
+        let tractCount = 0;
+        // For CT: rebuild ctTractToRegion from the Census response (county = planning region FIPS)
+        const rebuildCtMapping = stateFips === '09' && Object.keys(ctTractToRegion).length === 0;
+        results.forEach(result => {
+            if (result.status !== 'fulfilled' || !result.value) return;
+            const { countyFips, raw } = result.value;
+            const pHeaders = raw[0];
+            const pIdx = {};
+            pHeaders.forEach((h, i) => { pIdx[h] = i; });
+            const prefetchIdxMap = {
+                r_total:    pIdx['B25070_001E'], r_007: pIdx['B25070_007E'], r_008: pIdx['B25070_008E'],
+                r_009:      pIdx['B25070_009E'], r_010: pIdx['B25070_010E'], r_notcomp: pIdx['B25070_011E'],
+                o_total:    pIdx['B25091_001E'], o_008: pIdx['B25091_008E'], o_009: pIdx['B25091_009E'],
+                o_010:      pIdx['B25091_010E'], o_011: pIdx['B25091_011E'], o_notcomp_m: pIdx['B25091_012E'],
+                o_015:      pIdx['B25091_015E'], o_016: pIdx['B25091_016E'], o_017: pIdx['B25091_017E'],
+                o_018:      pIdx['B25091_018E'], o_019: pIdx['B25091_019E'], o_notcomp_nm: pIdx['B25091_020E'],
+            };
+            for (let i = 1; i < raw.length; i++) {
+                const row = raw[i];
+                const county = row[pIdx['county']], tract = row[pIdx['tract']];
+                if (rebuildCtMapping) ctTractToRegion[tract] = county;
+                const tid = county + tract;
+                if (tractData[tid]) continue;  // already loaded from a drill-down, don't overwrite
+                const hb = burdenFromBrackets(row, prefetchIdxMap);
+                const lai = laiTractCache[tid] || (stateFips === '09' ? laiTractCache[tract] : null);
+                const countyFallback = countyData[county] || {};
+                const transportPct = (lai?.transportPct != null) ? lai.transportPct
+                    : (countyFallback.transportPct != null ? countyFallback.transportPct : null);
+                const transportCost = (lai?.transportCost != null) ? lai.transportCost
+                    : (countyFallback.transportCost != null ? countyFallback.transportCost : null);
+                const pop   = parseInt(row[pIdx['B01003_001E']]) || 0;
+                const units = parseInt(row[pIdx['B25001_001E']]) || 0;
+                tractData[tid] = {
+                    name: 'Tract '+tract, housingBurden: hb,
+                    transportPct, transportCost,
+                    profileId: lai ? (lai.profileId||null) : null,
+                    incomeRatio: lai ? (lai.incomeRatio||null) : null,
+                    transportFallback: (!lai || lai.transportPct == null) && transportPct != null,
+                    bivarColor: getBivarColor(hb, transportPct),
+                    population: pop, housingUnits: units,
+                    isSparse: pop < 100 || units < 50,
+                    prefetched: true   // flag so drill-down knows it can overwrite with full data
+                };
+                tractCount++;
+            }
+        });
+
+        // If eviction data is already loaded and overlay is active, re-run aggregation
+        // now that we have real population weights
+        if (evictionLoaded && evictionOverlayActive && currentView === 'county' && geojson) {
+            attachEvictionRates();  // populate rates first
+            renderHatchLayer(geojson.toGeoJSON(), f => f.properties.COUNTY);
+        }
+    }
+
+        // Re-render hatch after tract drill-down completes
+    function maybeRenderHatchOnTract(geoData) {
+        if (!evictionOverlayActive || !evictionLoaded) return;
+        attachEvictionRates();
+        renderHatchLayer(geoData, f => f.properties.COUNTY + f.properties.TRACT);
+    }
+
+    // Re-render hatch when returning to county view
+    function maybeRenderHatchOnCounty(geoData) {
+        if (!evictionOverlayActive || !evictionLoaded) return;
+        attachEvictionRates();
+        renderHatchLayer(geoData, f => f.properties.COUNTY);
+    }
+
+    </script>
+</body>
+</html>

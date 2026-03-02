@@ -43,7 +43,7 @@ A single-file browser application that maps housing cost burden against transpor
 1. Open `bivariate_cost_map_hud_eviction.html` in any modern browser — no build step, no server required.
 2. Get a free [Census API key](https://api.census.gov/data/key_signup.html) and paste it into the key field. HUD LAI data requires no key.
 3. Select a state and click **Load County Data**. Click any county to drill down to tract level.
-4. Toggle the eviction rate overlay with the switch in the sidebar (available for ~45 states).
+4. Toggle the eviction rate overlay with the switch in the sidebar (available for 26 states: AL AZ CO CT DE DC FL GA IA MA MN MO NE NJ NC OH OR PA RI SC TX UT VA WA WI WY).
 
 ---
 
@@ -242,11 +242,11 @@ The final application is a single self-contained HTML file with no server-side c
 
 | Source | Endpoint | Notes |
 |--------|----------|-------|
-| Census ACS 2022 (5-year) | `api.census.gov/data/2022/acs/acs5` | Requires user-supplied API key. Fetched per state at county level, then per county at tract level on drill-down. Key tables: B25070, B25091, B01003, B25001. |
-| HUD LAI v3 | `services.arcgis.com/.../Location_Affordability_Index_v3/FeatureServer/0/query` | No API key required. Queried per county with offset pagination. Returns eight household-profile transport cost estimates per tract. CT uses legacy county FIPS (001–015). |
-| TIGERweb (Census) | `tigerweb.geo.census.gov/.../MapServer/1` (county) and `MapServer/0` (tract) | No API key required. Returns GeoJSON boundaries. County boundaries fetched once on state load; tract boundaries fetched on drill-down. |
-| Eviction Lab | `eviction-lab-data-downloads.s3.amazonaws.com` | Two national CSVs: tract file (~20 MB) and county file (~3 MB). Fetched once on first toggle; cached as raw text strings for the session. CT tract GEOIDs indexed by 6-char tract number only. |
-| CartoDB basemap | `{s}.basemaps.cartocdn.com/light_nolabels` + `light_only_labels` | CC BY 3.0 / OpenStreetMap ODbL. Label layer rendered above data layer. |
+| Census ACS 2022 (5-year) | `api.census.gov` `/data/2022/acs/acs5` | Free API key required. Fetched per state at county level on load, then per county at tract level on drill-down. Key tables: B25070, B25091 (housing burden brackets), B01003 (population), B25001 (housing units). |
+| HUD LAI v3 | `services.arcgis.com` `/.../FeatureServer/0/query` | No key required. Queried per county with `resultOffset` pagination to bypass `maxRecordCount` truncation. Returns eight household-profile transport estimates per tract. CT queries use legacy county FIPS 001–015. |
+| TIGERweb (Census) | `tigerweb.geo.census.gov` `/.../MapServer/1` (county) `/.../MapServer/0` (tract) | No key required. Returns GeoJSON boundaries. County layer fetched once on state load; tract layer fetched on county drill-down. CT planning region boundaries are in the standard county endpoint. |
+| Eviction Lab | `eviction-lab-data-downloads` `.s3.amazonaws.com` | Two national CSVs: tract file (~20 MB) and county file (~3 MB). Fetched once on first toggle and cached as raw strings for the session. Available for 26 states meeting ≥67% tract coverage threshold. CT tracts indexed by 6-char tract number to work around legacy/planning-region GEOID mismatch. |
+| CartoDB basemap | `{s}.basemaps.cartocdn.com` `/light_nolabels` + `/light_only_labels` | CC BY 3.0 / OpenStreetMap ODbL. Two tile layers: base tiles below the data, label tiles in a separate pane above it. |
 
 ### 4.3 Key Global State Variables
 
