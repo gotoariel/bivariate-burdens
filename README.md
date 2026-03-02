@@ -42,7 +42,7 @@ A single-file browser application that maps housing cost burden against transpor
 
 ## Quick Start
 
-1. Open `bivariate_cost_map_hud_eviction.html` in any modern browser — no build step, no server required.
+1. Open `bivariate_cost_map.html` in any modern browser — no build step, no server required.
 2. Get a free [Census API key](https://api.census.gov/data/key_signup.html) and paste it into the key field. HUD LAI data requires no key.
 3. Select a state and click **Load County Data**. Click any county to drill down to tract level.
 4. Toggle the eviction rate overlay with the switch in the sidebar (available for 26 states: AL AZ CO CT DE DC FL GA IA MA MN MO NE NJ NC OH OR PA RI SC TX UT VA WA WI WY).
