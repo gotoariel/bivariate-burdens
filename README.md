@@ -4,6 +4,8 @@
 
 A single-file browser application that maps housing cost burden against transportation cost burden at the census tract and county level across all 50 states and DC. An optional eviction rate overlay adds a third dimension via SVG hatching.
 
+![screenshot](screenshots/dc_overlay_ui.png)
+
 **Data sources:** Census ACS 2022 (5-year) · HUD Location Affordability Index v3 · Eviction Lab 2000–2018  
 **License:** [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
 
